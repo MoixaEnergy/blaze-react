@@ -21,6 +21,8 @@ module Text.Blaze.Internal
     , Attribute (..)
     , AttributeValue
 
+      -- ** Traversals
+    , events
 
       -- * Creating custom tags and attributes.
     , customParent
@@ -69,6 +71,7 @@ module Text.Blaze.Internal
     ) where
 
 import           Control.Applicative
+import           Control.Lens                 (Traversal)
 
 import           Data.ByteString.Char8        (ByteString)
 import qualified Data.ByteString              as B
@@ -85,8 +88,6 @@ import           Data.Typeable                (Typeable)
 import           GHC.Exts                     (IsString (..))
 
 import           Prelude                      hiding (null)
-
-import           Text.Blaze.Event.Internal
 
 import           Unsafe.Coerce (unsafeCoerce)
 
@@ -139,16 +140,16 @@ instance IsString ChoiceString where
 -- | The core Markup datatype. The 'ev' type-parameter tracks the type of
 -- events that can be raised when this Markup is rendered.
 --
-data MarkupM act a
-      -- | Map all actions created by the inner Html.
-    = forall act'. MapActions (act' -> act) (MarkupM act' a)
+data MarkupM ev a
+      -- | Map all evions created by the inner Html.
+    = forall ev'. MapEvents (ev' -> ev) (MarkupM ev' a)
       -- | Install event handlers for the given event on all immediate
       -- children.
-    | OnEvent (EventHandler act) (MarkupM act a)
+    | OnEvent ev (MarkupM ev a)
       -- | Tag, open tag, end tag, content
-    | forall b. Parent StaticString StaticString StaticString (MarkupM act b)
+    | forall b. Parent StaticString StaticString StaticString (MarkupM ev b)
       -- | Custom parent
-    | forall b. CustomParent ChoiceString (MarkupM act b)
+    | forall b. CustomParent ChoiceString (MarkupM ev b)
       -- | Tag, open tag, end tag
     | Leaf StaticString StaticString StaticString
       -- | Custom leaf
@@ -156,16 +157,16 @@ data MarkupM act a
       -- | HTML content
     | Content ChoiceString
       -- | Concatenation of two HTML pieces
-    | forall b c. Append (MarkupM act b) (MarkupM act c)
+    | forall b c. Append (MarkupM ev b) (MarkupM ev c)
       -- | Add an attribute to the inner HTML. Raw key, key, value, HTML to
       -- receive the attribute.
-    | AddAttribute StaticString StaticString ChoiceString (MarkupM act a)
+    | AddAttribute StaticString StaticString ChoiceString (MarkupM ev a)
       -- | Add a boolean attribute.
-    | AddBoolAttribute StaticString Bool (MarkupM act a)
+    | AddBoolAttribute StaticString Bool (MarkupM ev a)
       -- | Add a custom attribute to the inner HTML.
-    | AddCustomAttribute ChoiceString ChoiceString (MarkupM act a)
+    | AddCustomAttribute ChoiceString ChoiceString (MarkupM ev a)
       -- | Add an attribute containing a text-text map to the inner HTML.
-    | AddObjectAttribute StaticString (HMS.HashMap T.Text T.Text) (MarkupM act a)
+    | AddObjectAttribute StaticString (HMS.HashMap T.Text T.Text) (MarkupM ev a)
       -- | Empty HTML.
     | Empty
     deriving (Typeable)
@@ -202,6 +203,25 @@ instance Monad (MarkupM ev) where
 instance IsString (MarkupM ev a) where
     fromString = Content . fromString
     {-# INLINE fromString #-}
+
+-- | A traversal for all events in the markup.
+{-# INLINABLE events #-}
+events :: Traversal (MarkupM ev a) (MarkupM ev' a) ev ev'
+events f m = case m of
+    MapEvents g a            -> events (f . g) a
+    OnEvent ev a             -> OnEvent <$> f ev <*> events f a
+    Parent x y z a           -> Parent x y z <$> events f a
+    CustomParent x a         -> CustomParent x <$> events f a
+    Leaf x y z               -> pure (Leaf x y z)
+    CustomLeaf x y           -> pure (CustomLeaf x y)
+    Content x                -> pure (Content x)
+    Append a b               -> Append <$> events f a <*> events f b
+    AddAttribute x y z a     -> AddAttribute x y z <$> events f a
+    AddBoolAttribute x y a   -> AddBoolAttribute x y <$> events f a
+    AddCustomAttribute x y a -> AddCustomAttribute x y <$> events f a
+    AddObjectAttribute x y a -> AddObjectAttribute x y <$> events f a
+    Empty                    -> pure Empty
+
 
 -- | Type for an HTML tag. This can be seen as an internal string type used by
 -- BlazeMarkup.
@@ -490,7 +510,7 @@ instance Attributable (MarkupM ev a -> MarkupM ev b) ev where
 -- combinators.
 --
 external :: MarkupM ev a -> MarkupM ev a
-external (MapActions f x) = MapActions f (external x)
+external (MapEvents f x) = MapEvents f (external x)
 external (OnEvent ev x) = OnEvent ev (external x)
 external (Content x) = Content $ External x
 external (Append x y) = Append (external x) (external y)
@@ -514,7 +534,7 @@ external x = x
 -- > Hello World!
 --
 contents :: MarkupM ev a -> MarkupM ev' b
-contents (MapActions _ c)           = contents c
+contents (MapEvents _ c)           = contents c
 contents (OnEvent _ c)              = contents c
 contents (Parent _ _ _ c)           = contents c
 contents (CustomParent _ c)         = contents c
@@ -530,7 +550,7 @@ contents _                          = Empty
 -- string).
 null :: MarkupM ev a -> Bool
 null markup = case markup of
-    MapActions _ c           -> null c
+    MapEvents _ c           -> null c
     OnEvent _ c              -> null c
     Parent _ _ _ _           -> False
     CustomParent _ _         -> False

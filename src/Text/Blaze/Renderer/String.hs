@@ -66,7 +66,7 @@ renderString =
   where
     go :: (String -> String) -> MarkupM ev b -> String -> String
     go attrs html = case html of
-        MapActions _f content ->
+        MapEvents _f content ->
             go attrs content
         OnEvent _ev content ->
             -- TODO (meiersi): add more details about the event handler registered.

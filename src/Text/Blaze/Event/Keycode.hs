@@ -43,6 +43,7 @@ module Text.Blaze.Event.Keycode
 
 -- | A representation of a physical key.
 newtype Keycode = Keycode { unKeycode :: Int }
+    deriving (Eq, Ord, Show)
 
 
 -------------------------------------------------------------------------------

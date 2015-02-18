@@ -1,4 +1,5 @@
-{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module Text.Blaze.Event.Internal
     ( EventHandler(..)
@@ -19,13 +20,13 @@ import           Text.Blaze.Event.Charcode (Charcode)
 
 -- | One specific and incomplete specifications of event-handlers geared
 -- towards their use with ReactJS.
-data EventHandler a
-    = OnKeyDown  [Keycode]  (IO a)
-    | OnKeyUp    [Keycode]  (IO a)
-    | OnKeyPress [Charcode] (IO a)
+data EventHandler eventData where
+    OnKeyDown  :: ![Keycode]  -> EventHandler ()
+    OnKeyUp    :: ![Keycode]  -> EventHandler ()
+    OnKeyPress :: ![Charcode] -> EventHandler ()
 
-    | OnFocus (IO a)
-    | OnBlur  (IO a)
+    OnFocus    :: EventHandler ()
+    OnBlur     :: EventHandler ()
 
     -- NOTE (asayers): In ReactJS, I believe OnInput has the same semantics as
     -- OnChange, so I won't bother adding it here.
@@ -33,22 +34,23 @@ data EventHandler a
     -- seems to be discouraged in ReactJS (doing this throws a warning).
     -- Therefore I'm removing OnSelectedChange in favour of using OnValueChange
     -- on the <select> element.
-    | OnValueChange    (T.Text -> IO a)
-    | OnCheckedChange  (Bool   -> IO a)
-    | OnSubmit (IO a)
+    OnValueChange   :: !T.Text -> EventHandler ()
+    OnCheckedChange :: !Bool   -> EventHandler ()
+    OnSubmit        ::            EventHandler ()
 
-    | OnClick       [MouseButton] (MousePosition -> IO a)
-    | OnDoubleClick [MouseButton] (MousePosition -> IO a)
-    | OnMouseDown   [MouseButton] (MousePosition -> IO a)
-    | OnMouseUp     [MouseButton] (MousePosition -> IO a)
-    | OnMouseMove                 (MousePosition -> IO a)
-    | OnMouseEnter                (MousePosition -> IO a)
-    | OnMouseLeave                (MousePosition -> IO a)
-    | OnMouseOver                 (MousePosition -> IO a)
-    | OnMouseOut                  (MousePosition -> IO a)
+    OnClick       :: ![MouseButton] -> EventHandler MousePosition
+    OnDoubleClick :: ![MouseButton] -> EventHandler MousePosition
+    OnMouseDown   :: ![MouseButton] -> EventHandler MousePosition
+    OnMouseUp     :: ![MouseButton] -> EventHandler MousePosition
+    OnMouseMove   ::                   EventHandler MousePosition
+    OnMouseEnter  ::                   EventHandler MousePosition
+    OnMouseLeave  ::                   EventHandler MousePosition
+    OnMouseOver   ::                   EventHandler MousePosition
+    OnMouseOut    ::                   EventHandler MousePosition
 
-    | OnScroll (Int -> IO a)
-    | OnWheel (DomDelta -> IO a)
+    OnScroll :: EventHandler Int
+    OnWheel  :: EventHandler DomDelta
+
 
     -- TODO (asayers): Implement these
     -- OnCopy  ([File] -> IO a)
@@ -71,35 +73,48 @@ data EventHandler a
     -- OnTouchEnd    (IO a)
     -- OnTouchMove   (IO a)
     -- OnTouchStart  (IO a)
-    deriving (Functor)
 
-data MouseButton = LeftButton | RightButton | MiddleButton deriving (Eq, Show)
+data MouseButton
+    = LeftButton
+    | RightButton
+    | MiddleButton
+    deriving (Eq, Show)
+
 data MousePosition = MousePosition
-    { mpClientX :: Int
+    { mpClientX :: {-# UNPACK #-} !Int
       -- ^ x-position relative to the upper-left corner of the viewport
-    , mpClientY :: Int
+    , mpClientY :: {-# UNPACK #-} !Int
       -- ^ y-position relative to the upper-left corner of the viewport
-    , mpPageX   :: Int
+    , mpPageX   :: {-# UNPACK #-} !Int
       -- ^ x-position relative to the upper-left corner of the content-area
-    , mpPageY   :: Int
+    , mpPageY   :: {-# UNPACK #-} !Int
       -- ^ y-position relative to the upper-left corner of the content-area
-    , mpScreenX :: Int
+    , mpScreenX :: {-# UNPACK #-} !Int
       -- ^ x-position relative to the upper-left corner of the physical screen
-    , mpScreenY :: Int
+    , mpScreenY :: {-# UNPACK #-} !Int
       -- ^ y-position relative to the upper-left corner of the physical screen
     } deriving (Eq, Show)
 
 data DomDelta
-    = PixelDelta DeltaValue
-    | LineDelta  DeltaValue
-    | PageDelta  DeltaValue
-data DeltaValue = DeltaValue { deltaX :: Double, deltaY :: Double, deltaZ :: Double }
+    = PixelDelta !DeltaValue
+    | LineDelta  !DeltaValue
+    | PageDelta  !DeltaValue
+
+data DeltaValue = DeltaValue
+    { deltaX :: {-# UNPACK #-} !Double
+    , deltaY :: {-# UNPACK #-} !Double
+    , deltaZ :: {-# UNPACK #-} !Double
+    }
 
 data File = File
-    { fileName         :: T.Text
-    , fileMimeType     :: T.Text
-    , fileSize         :: Int    -- ^ Size of the blob in bytes
-    , fileLastModified :: UTCTime
-    , fileRead         :: IO BS.ByteString -- ^ Read the contents of the blob
+    { fileName         ::                !T.Text
+    , fileMimeType     ::                !T.Text
+    , fileSize         :: {-# UNPACK #-} !Int
+      -- ^ Size of the blob in bytes
+    , fileLastModified ::                !UTCTime
+    , fileRead         ::                !(IO BS.ByteString)
+      -- ^ Read the contents of the blob.
+      -- NOTE (SM): I'm not sure whether we can support this in a
+      -- cross-platform way.
     }
 
