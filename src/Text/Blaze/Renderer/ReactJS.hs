@@ -25,6 +25,7 @@ import qualified Data.ByteString       as S
 
 import qualified GHCJS.Foreign         as Foreign
 import           GHCJS.Marshal         as Marshal
+import           GHCJS.Prim            (isNull)
 import           GHCJS.Types           (JSString, JSRef, JSArray, JSObject, castRef)
 
 import           Prelude               hiding (span)
@@ -47,6 +48,8 @@ type ReactJSNode = JSRef ReactJSNode_
 
 type ReactJSNodes = JSArray ReactJSNode
 
+data JSClientRect_
+type JSClientRect = JSRef JSClientRect_
 
 foreign import javascript unsafe
     "h$reactjs.mkDomNode($1, $2, $3)"
@@ -64,6 +67,10 @@ foreign import javascript unsafe
 foreign import javascript unsafe
     "$1.stopPropagation()"
     stopPropagation :: ReactJSEvent -> IO ()
+
+foreign import javascript unsafe
+    "$1.getBoundingClientRect()"
+    getBoundingClientRect :: JSRef a -> IO JSClientRect
 
 
 ------------------------------------------------------------------------------
@@ -274,11 +281,16 @@ reactEventName ev = case ev of
     OnWheelE       -> "onWheel"
 
 lookupProp :: JSString -> JSRef a -> EitherT T.Text IO (JSRef b)
-lookupProp name obj = do
-    mbProp <- lift $ Foreign.getPropMaybe name obj
-    maybe (left err) return mbProp
+lookupProp name obj =
+    if isNull obj
+      then
+        left nullErr
+      else do
+        mbProp <- lift $ Foreign.getPropMaybe name obj
+        maybe (left err) return mbProp
   where
     err = "failed to get property '" <> Foreign.fromJSString name <> "'."
+    nullErr = "trying to get property '" <> Foreign.fromJSString name <> "' of <null>."
 
 lookupIntProp :: JSString -> JSRef a -> EitherT T.Text IO Int
 lookupIntProp name obj = do
@@ -295,6 +307,15 @@ lookupDoubleProp name obj = do
     case mbDouble of
       Nothing -> left "lookupDoubleProp: couldn't parse field as Double"
       Just x  -> return x
+
+data ClientRect = ClientRect { crLeft :: Int
+                             , crTop :: Int
+                             } deriving (Show, Eq)
+
+asClientRect :: JSClientRect -> EitherT T.Text IO ClientRect
+asClientRect jscr =
+    ClientRect <$> lookupIntProp "left" jscr
+               <*> lookupIntProp "top" jscr
 
 data Handler
     = IgnoreEvent
@@ -415,6 +436,9 @@ registerEventHandler eh props = case eh of
         pageY   <- lookupIntProp "pageY"   eventRef
         screenX <- lookupIntProp "screenX" eventRef
         screenY <- lookupIntProp "screenY" eventRef
+        target  <- lookupProp "currentTarget" eventRef
+        cr      <- asClientRect =<< lift (getBoundingClientRect target)
+
         return MousePosition
           { mpClientX = clientX
           , mpClientY = clientY
@@ -422,6 +446,8 @@ registerEventHandler eh props = case eh of
           , mpPageY   = pageY
           , mpScreenX = screenX
           , mpScreenY = screenY
+          , mpTargetX = crLeft cr
+          , mpTargetY = crTop cr
           }
 
 

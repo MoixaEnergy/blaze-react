@@ -87,6 +87,10 @@ data MousePosition = MousePosition
       -- ^ x-position relative to the upper-left corner of the physical screen
     , mpScreenY :: Int
       -- ^ y-position relative to the upper-left corner of the physical screen
+    , mpTargetX :: Int
+      -- ^ x-position of related target
+    , mpTargetY :: Int
+      -- ^ y-position of related target
     } deriving (Eq, Show)
 
 data DomDelta
@@ -102,4 +106,3 @@ data File = File
     , fileLastModified :: UTCTime
     , fileRead         :: IO BS.ByteString -- ^ Read the contents of the blob
     }
-
