@@ -56,10 +56,12 @@ module Text.Blaze.Internal
     , null
     ) where
 
+import           Control.Applicative
 import           Control.Monad.Writer
 
-import           Data.Aeson                   (ToJSON(..))
+import           Data.Aeson                   (ToJSON(..), FromJSON(..))
 import qualified Data.Aeson                   as Aeson
+import qualified Data.Aeson.Types             as Aeson (Parser)
 import qualified Data.ByteString              as B
 import           Data.Foldable                (Foldable)
 import qualified Data.HashMap.Strict          as HMS
@@ -70,6 +72,7 @@ import qualified Data.Text.Encoding           as T
 import qualified Data.Text.Lazy               as LT
 import           Data.Traversable             (Traversable)
 import           Data.Typeable                (Typeable)
+import qualified Data.Vector                  as V
 
 import           GHC.Exts                     (IsString (..))
 
@@ -410,8 +413,10 @@ choiceStringToString =
 
 instance ToJSON ChoiceString where
     -- NOTE (SM): we use this chance to flatten the string.
-    -- TODO (SM): more efficient JSON serialization.
     toJSON = toJSON . choiceStringToString
+
+instance FromJSON ChoiceString where
+    parseJSON val = Text <$> parseJSON val
 
 instance ToJSON ev => ToJSON (Markup ev) where
     toJSON markup = case markup of
@@ -428,4 +433,41 @@ instance ToJSON ev => ToJSON (Markup ev) where
       where
         tagged :: Int -> [Aeson.Value] -> Aeson.Value
         tagged tag args = toJSON (toJSON tag : args)
+
+instance FromJSON ev => FromJSON (Markup ev) where
+    parseJSON = Aeson.withArray "Markup" $ \arr -> do
+        tag <- maybe (fail "Expected tag.") parseJSON (arr V.!? 0)
+        let pos :: FromJSON a => Int -> Maybe (Aeson.Parser a)
+            pos i = parseJSON <$> (arr V.!? i)
+
+            check :: Int -> Maybe (Aeson.Parser a) -> Aeson.Parser a
+            check l mbM
+              | l == V.length arr =
+                  maybe (fail "Failed inner parse.") id mbM
+              | otherwise     = fail $
+                  "Expected length " <> show l <>
+                  ", got " <> show (V.length arr) <> "."
+
+            lift1 :: FromJSON a => (a -> b) -> Aeson.Parser b
+            lift1 constr = check 2 (fmap constr <$> pos 1)
+
+            lift2 :: (FromJSON a, FromJSON b) => (a -> b -> c) -> Aeson.Parser c
+            lift2 constr = check 3 (liftA2 constr <$> pos 1 <*> pos 2)
+
+            lift3 :: (FromJSON a, FromJSON b, FromJSON c)
+                  => (a -> b -> c -> d) -> Aeson.Parser d
+            lift3 constr = check 4 (liftA3 constr <$> pos 1 <*> pos 2 <*> pos 3)
+
+        case (tag :: Int) of
+          0 -> lift2 OnEvent
+          1 -> lift2 Parent
+          2 -> lift2 Leaf
+          3 -> lift1 Content
+          4 -> lift2 Append
+          5 -> lift3 AddAttribute
+          6 -> lift3 AddBoolAttribute
+          7 -> lift3 AddCustomAttribute
+          8 -> lift3 AddObjectAttribute
+          9 -> check 1 (Just (return Empty))
+          _ -> fail $ "Unexpected tag " <> show tag
 

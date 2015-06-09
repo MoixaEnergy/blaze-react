@@ -17,6 +17,7 @@ import           Control.Lens                (preview, ix)
 
 import           Data.Foldable               (foldMap)
 import qualified Data.HashMap.Strict         as HMS
+import           Data.Monoid                 ((<>))
 import           Data.Typeable               (Typeable, cast)
 
 import qualified Text.Blaze.Html5            as H
@@ -26,12 +27,12 @@ import qualified Text.Blaze.Event            as E
 
 data SomeRenderer
     = forall st act. (Typeable st, Typeable act, Show act)
-    => SomeRenderer (st -> WindowState act)
+    => SomeRenderer (st -> WindowState (E.EventHandler act))
 
 wrapRenderers
     :: [SomeRenderer]
     -> TabbedS
-    -> WindowState TabbedA
+    -> WindowState (E.EventHandler TabbedA)
 wrapRenderers renderers tabbedState@(TabbedS focus states) =
     case preview (ix focus) (zip states renderers) of
       Nothing -> error "wrapRenderers: app not found"
@@ -47,12 +48,14 @@ wrapRenderers renderers tabbedState@(TabbedS focus states) =
 
 renderBody
     :: (Typeable act, Show act)
-    => TabbedS -> H.Html act -> H.Html TabbedA
-renderBody (TabbedS focus states) innerBody = do
-    H.div H.! A.class_ "tabbed-app-picker" $
-      foldMap (uncurry appItem) $ zip [0..] states
-    H.div H.! A.class_ "tabbed-internal-app" $
-      E.mapActions (InnerA focus . SomeAction) innerBody
+    => TabbedS -> H.Html (E.EventHandler act) -> H.Html (E.EventHandler TabbedA)
+renderBody (TabbedS focus states) innerBody =
+    ( H.div H.! A.class_ "tabbed-app-picker" $
+        foldMap (uncurry appItem) $ zip [0..] states
+    ) <>
+    ( H.div H.! A.class_ "tabbed-internal-app" $
+        E.mapActions (InnerA focus . SomeAction) innerBody
+    )
   where
     appItem appIdx app = H.span
       H.!? (focus == appIdx, A.style (HMS.fromList [("color", "#eee")]))

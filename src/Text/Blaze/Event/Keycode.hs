@@ -1,4 +1,4 @@
-
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- | The DOM has two ways of describing keyboard events: by Keycode, or by
 -- Charcode. The Keycode represents the physical key which was involved,
 -- whereas the Charcode represents the resulting character. Therefore, a
@@ -41,9 +41,11 @@ module Text.Blaze.Event.Keycode
     , closeBraket    , singleQuote
     ) where
 
+import Data.Aeson (ToJSON, FromJSON)
+
 -- | A representation of a physical key.
 newtype Keycode = Keycode { unKeycode :: Int }
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, ToJSON, FromJSON)
 
 
 -------------------------------------------------------------------------------
