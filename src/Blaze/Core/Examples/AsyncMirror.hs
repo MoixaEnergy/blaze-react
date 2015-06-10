@@ -4,39 +4,42 @@
 -- on the server.
 module Blaze.Core.Examples.AsyncMirror
   ( mirror
+  , renderMirror
   , serveMirror
-  , ReactJSEvent(..)
   ) where
 
--- import Control.Applicative
-import Control.Concurrent.STM.TVar (TVar, newTVarIO, readTVar, writeTVar)
-import Control.Lens                (preview, _Left)
-import Control.Monad
-import Control.Monad.STM           (STM, atomically)
-import Control.Monad.State
+import           Control.Applicative
+import           Control.Concurrent.STM.TVar (TVar, newTVarIO, readTVar, writeTVar)
+import           Control.Lens                (preview, _Left)
+import           Control.Monad
+import           Control.Monad.STM           (STM, atomically)
+import           Control.Monad.State
 
-import Data.Traversable
+import           Data.Traversable
+import           Data.Monoid
+import qualified Data.Aeson       as Aeson
 
-import Blaze.Core
+import           Blaze.Core
+import qualified Text.Blaze.Event          as E
+import qualified Text.Blaze.Event.Internal as EI
+import qualified Text.Blaze.Html5          as H
 
 
 import Prelude hiding (lookup)
 
-
-data ReactJSEvent = ReactJSEvent -- placeholder
-
-type BlazeHtml a = [a]
+-- | An event that happened at element 'i' and whose eventData is serialized
+-- to the given 'Aeson.Value'.
+data ReactJSEvent = ReactJSEvent !Int !Aeson.Value
 
 -- | Client state encapsulating server-state 'ss' and view 'v'.
-type MirrorS st = Maybe (RevId, st, BlazeHtml Int)
+type MirrorS st = Maybe (RevId, st, H.Html (E.SomeEvent, Int))
 
--- | Report that the server failed to return a new state or that there is a
--- new state.
+-- | Actions that happen in the mirror application.
 data MirrorA st
-    = UpdateReflectionA !RevId !st !(BlazeHtml Int)
+    = UpdateReflectionA !RevId !st !(H.Html (E.SomeEvent, Int))
       -- ^ Update the state and view of the reflection that we are
       -- maintaining.
-    | HandleEventA !RevId !Int !ReactJSEvent
+    | HandleEventA !RevId !ReactJSEvent
       -- ^ Handle the event that was triggered in our view, which is the
       -- rendered version of the state with the given revision-id.
 
@@ -44,7 +47,16 @@ data MirrorR
     = GetReflectionR !(Maybe RevId)
       -- ^ Request the next mirror-image, which must have a revision-id that
       -- is larger than the one that we are currently displaying.
-    | HandleEventR !RevId !Int !ReactJSEvent
+    | HandleEventR !RevId !ReactJSEvent
+
+renderMirror :: MirrorS st -> H.Html (E.EventHandler (MirrorA st))
+renderMirror Nothing                   = mempty
+renderMirror (Just (revId, _st, html)) =
+    toAction <$> html
+  where
+    toAction (EI.SomeEvent ev, pos) =
+        EI.EventHandler ev $ \evData ->
+            HandleEventA revId (ReactJSEvent pos (EI.eventDataToJson ev evData))
 
 -- | Create an app for proxying the session with the given 'SessionId', which
 -- is usually chosen randomly.
@@ -60,8 +72,8 @@ mirror = App
     , appInitialRequest = [GetReflectionR Nothing]
     , appApplyAction    = \act -> runApplyActionM $ do
         case act of
-          HandleEventA revId pos ev ->
-            submitRequest [HandleEventR revId pos ev]
+          HandleEventA revId ev ->
+            submitRequest [HandleEventR revId ev]
           UpdateReflectionA revId st view -> do
             writeState (Just (revId, st, view))
             submitRequest [GetReflectionR (Just revId)]
@@ -73,7 +85,7 @@ mirror = App
     let evalMirrorR GetNextReflectionR = handleGetReflection
         evalMirrorR HandleEventR = handleGetReflection
 
-        renderMirror :: BlazeHtml Int -> BlazeHtml (ReactJSEvent -> IO act)
+        renderMirror :: H.Html Int -> H.Html (ReactJSEvent -> IO act)
 
     -- run blaze react on mirrored app
     runBlazeReact (evalMirrorR <$> mirror)
@@ -105,9 +117,9 @@ type RevId = Int
 
 serveMirror
     :: forall st act.
-       (st -> BlazeHtml (ReactJSEvent -> Maybe act))
+       (st -> H.Html (ReactJSEvent -> Maybe act))
     -> App st act (IORequest act)
-    -> IO ( Maybe RevId -> IO (BlazeHtml Int, RevId)
+    -> IO ( Maybe RevId -> IO (H.Html Int, RevId)
           , Int -> ReactJSEvent -> RevId -> IO ()
           )
 serveMirror render app = do
@@ -176,7 +188,7 @@ type CaptureR st req = ([MirrorA st], [req])
 
 capture
     :: App st act req
-    -> (st -> BlazeHtml (ReactJSEvent -> action))
+    -> (st -> H.Html (ReactJSEvent -> action))
        -- ^ Render function
     -> App (CaptureS st) (CaptureA act) (CaptureR req)
 capture app render = App

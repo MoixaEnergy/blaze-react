@@ -5,6 +5,8 @@
 module Text.Blaze.Event.Internal
     ( EventHandler(..)
     , Event(..)
+    , eventDataToJson
+    , SomeEvent(..)
     , MouseButton(..)
     , MousePosition(..)
     , DomDelta(..)
@@ -40,15 +42,14 @@ Markup (EventHandler act) -> Markup (EventHandler act, Int)
 
 Markup (EventHandler act) -> Markup (SomeEvent, Int)
 
-eventDataToFromJSON
-    :: Event eventData -> (eventData -> Aeson.Value, Aeson.Value -> Aeson.Parser eventData)
-eventDataToFromJSON = undefined
 
 
 instance ToJSON (Event eventData) where
 
 -}
 
+eventDataToJson :: Event eventData -> eventData -> Aeson.Value
+eventDataToJson = error "eventDataToJson"
 
 
 -- | One specific and incomplete specifications of event-handlers geared

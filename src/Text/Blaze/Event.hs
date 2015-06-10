@@ -6,6 +6,7 @@ module Text.Blaze.Event
     , Keycode
     , Charcode
     , EventHandler
+    , SomeEvent
 
       -- ** Mapping over all actions
     , mapActions
