@@ -1,12 +1,16 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE StandaloneDeriving #-}
 
 module Text.Blaze.Event.Internal
     ( EventHandler(..)
+    , EventSelector(..)
+    , SomeEventSelector(..)
     , Event(..)
     , eventDataToJson
     , SomeEvent(..)
+    , someEventData
     , MouseButton(..)
     , MousePosition(..)
     , DomDelta(..)
@@ -24,43 +28,62 @@ import qualified Data.ByteString           as BS
 import           Data.Monoid               ((<>))
 import qualified Data.Text                 as T
 import           Data.Time.Clock           (UTCTime)
+import           Data.Typeable             (Typeable, cast)
 import qualified Data.Vector               as V
 
 import           Text.Blaze.Event.Keycode  (Keycode)
 import           Text.Blaze.Event.Charcode (Charcode)
 
 -- | An Event handler converting events to actions of type 'act'.
-data EventHandler act = forall eventData. EventHandler (Event eventData) (eventData -> act)
+data EventHandler act
+    = forall evData.
+      EventHandler (EventSelector evData) (evData -> act)
 
 instance Functor EventHandler where
     fmap f (EventHandler ev mkAct) = EventHandler ev (f . mkAct)
 
-data SomeEvent = forall eventData. SomeEvent (Event eventData)
+data SomeEventSelector where
+    SomeEventSelector
+        :: forall evData. EventSelector evData -> SomeEventSelector
 
-{-
-Markup (EventHandler act) -> Markup (EventHandler act, Int)
+data Event evData = Event !(EventSelector evData) !evData
 
-Markup (EventHandler act) -> Markup (SomeEvent, Int)
+data SomeEvent where
+    SomeEvent :: forall evData. Event evData -> SomeEvent
+
+someEventData :: SomeEvent -> EventSelector evData -> Maybe evData
+someEventData (SomeEvent (Event sel evData)) sel' =
+    case (sel, sel') of
+      (OnKeyDown x, OnKeyDown x') -> ifEqual x x' evData
+      (OnClick x,   OnClick x')   -> ifEqual x x' evData
+      _                           -> Nothing
+  where
+    ifEqual :: Eq a => a -> a -> b -> Maybe b
+    ifEqual a a' b = guard (a == a') >> return b
 
 
-
-instance ToJSON (Event eventData) where
-
--}
-
-eventDataToJson :: Event eventData -> eventData -> Aeson.Value
+eventDataToJson :: EventSelector evData -> evData -> Aeson.Value
 eventDataToJson = error "eventDataToJson"
+
+instance ToJSON (Event evData) where
+    toJSON (Event selector data_) = eventDataToJson selector data_
+
+instance ToJSON SomeEvent where
+    toJSON (SomeEvent ev) = toJSON ev
+
+instance FromJSON SomeEvent where
+    parseJSON = error "SomeEvent"
 
 
 -- | One specific and incomplete specifications of event-handlers geared
 -- towards their use with ReactJS.
-data Event eventData where
-    OnKeyDown  :: ![Keycode]  -> Event Keycode
-    -- OnKeyUp    :: ![Keycode]  -> Event Keycode
-    -- OnKeyPress :: ![Charcode] -> Event Keycode
+data EventSelector evData where
+    OnKeyDown  :: ![Keycode]  -> EventSelector Keycode
+    -- OnKeyUp    :: ![Keycode]  -> EventSelector Keycode
+    -- OnKeyPress :: ![Charcode] -> EventSelector Keycode
 
-    -- OnFocus    :: Event ()
-    -- OnBlur     :: Event ()
+    -- OnFocus    :: EventSelector ()
+    -- OnBlur     :: EventSelector ()
 
     -- -- NOTE (asayers): In ReactJS, I believe OnInput has the same semantics as
     -- -- OnChange, so I won't bother adding it here.
@@ -68,22 +91,22 @@ data Event eventData where
     -- -- seems to be discouraged in ReactJS (doing this throws a warning).
     -- -- Therefore I'm removing OnSelectedChange in favour of using OnValueChange
     -- -- on the <select> element.
-    -- OnValueChange   :: Event T.Text
-    -- OnCheckedChange :: Event Bool
-    -- OnSubmit        :: Event ()
+    -- OnValueChange   :: EventSelector T.Text
+    -- OnCheckedChange :: EventSelector Bool
+    -- OnSubmit        :: EventSelector ()
 
-    OnClick       :: ![MouseButton] -> Event MousePosition
-    -- OnDoubleClick :: ![MouseButton] -> Event MousePosition
-    -- OnMouseDown   :: ![MouseButton] -> Event MousePosition
-    -- OnMouseUp     :: ![MouseButton] -> Event MousePosition
-    -- OnMouseMove   ::                   Event MousePosition
-    -- OnMouseEnter  ::                   Event MousePosition
-    -- OnMouseLeave  ::                   Event MousePosition
-    -- OnMouseOver   ::                   Event MousePosition
-    -- OnMouseOut    ::                   Event MousePosition
+    OnClick       :: ![MouseButton] -> EventSelector MousePosition
+    -- OnDoubleClick :: ![MouseButton] -> EventSelector MousePosition
+    -- OnMouseDown   :: ![MouseButton] -> EventSelector MousePosition
+    -- OnMouseUp     :: ![MouseButton] -> EventSelector MousePosition
+    -- OnMouseMove   ::                   EventSelector MousePosition
+    -- OnMouseEnter  ::                   EventSelector MousePosition
+    -- OnMouseLeave  ::                   EventSelector MousePosition
+    -- OnMouseOver   ::                   EventSelector MousePosition
+    -- OnMouseOut    ::                   EventSelector MousePosition
 
-    -- OnScroll :: Event Int
-    -- OnWheel  :: Event DomDelta
+    -- OnScroll :: EventSelector Int
+    -- OnWheel  :: EventSelector DomDelta
 
 
     -- TODO (asayers): Implement these
@@ -109,10 +132,10 @@ data Event eventData where
     -- OnTouchStart  (IO a)
 
 
-deriving instance Eq (Event eventData)
-deriving instance Show (Event eventData)
+deriving instance Eq (EventSelector evData)
+deriving instance Show (EventSelector evData)
 
-instance ToJSON (Event eventData) where
+instance ToJSON (EventSelector evData) where
     toJSON ev = case ev of
         OnKeyDown keys  -> tagged 0 [toJSON keys]
         OnClick buttons -> tagged 8 [toJSON buttons]
@@ -120,10 +143,10 @@ instance ToJSON (Event eventData) where
         tagged :: Int -> [Aeson.Value] -> Aeson.Value
         tagged tag args = toJSON (toJSON tag : args)
 
-instance ToJSON SomeEvent where
-    toJSON (SomeEvent ev) = toJSON ev
+instance ToJSON SomeEventSelector where
+    toJSON (SomeEventSelector ev) = toJSON ev
 
-instance FromJSON SomeEvent where
+instance FromJSON SomeEventSelector where
     parseJSON = Aeson.withArray "Event" $ \arr -> do
         tag <- maybe (fail "Expected tag.") parseJSON (arr V.!? 0)
         let pos :: FromJSON a => Int -> Maybe (Aeson.Parser a)
@@ -141,18 +164,15 @@ instance FromJSON SomeEvent where
             lift1 constr = check 2 (fmap constr <$> pos 1)
 
         case (tag :: Int) of
-          0 -> lift1 (SomeEvent . OnKeyDown)
-          8 -> lift1 (SomeEvent . OnClick)
+          0 -> lift1 (SomeEventSelector . OnKeyDown)
+          8 -> lift1 (SomeEventSelector . OnClick)
           _ -> fail $ "Unexpected tag " <> show tag
-
-
-
 
 data MouseButton
     = LeftButton
     | RightButton
     | MiddleButton
-    deriving (Eq, Show, Enum, Bounded)
+    deriving (Eq, Show, Typeable, Enum, Bounded)
 
 instance ToJSON MouseButton where
     toJSON = toJSON . fromEnum
@@ -181,7 +201,7 @@ data MousePosition = MousePosition
       -- ^ x-position relative to the upper-left corner of the physical screen
     , mpScreenY :: {-# UNPACK #-} !Int
       -- ^ y-position relative to the upper-left corner of the physical screen
-    } deriving (Eq, Show)
+    } deriving (Eq, Show, Typeable)
 
 data DomDelta
     = PixelDelta !DeltaValue

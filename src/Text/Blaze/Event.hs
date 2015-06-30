@@ -7,6 +7,7 @@ module Text.Blaze.Event
     , Charcode
     , EventHandler
     , SomeEvent
+    , SomeEventSelector
 
       -- ** Mapping over all actions
     , mapActions
@@ -298,7 +299,7 @@ onWheelM = onEvent . OnWheel
 -}
 
 -- | Register an event handler.
-onEvent :: Event eventData -> (eventData -> act) -> Attribute (EventHandler act)
+onEvent :: EventSelector eventData -> (eventData -> act) -> Attribute (EventHandler act)
 onEvent ev mkAct = Attribute (OnEvent (EventHandler ev mkAct))
 {-# INLINE onEvent #-}
 
