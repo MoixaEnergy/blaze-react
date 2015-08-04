@@ -60,8 +60,8 @@ library
                        Blaze2.ReactJS.Examples.TimeMachine
 
 
-  build-depends:       aeson                == 0.8.*
-                     , base                 >=4.7     && <4.8
+  build-depends:       aeson                == 0.9.*
+                     , base                 >=4.8     && <4.9
                      , bytestring           >= 0.10.4 && < 0.11
                      , either               == 4.*
                      , ghcjs-base
@@ -71,12 +71,12 @@ library
                      , lens                 == 4.*
                      , mtl                  == 2.*
                      , pretty-show          == 1.*
-                     , profunctors          == 4.*
-                     , QuickCheck           == 2.6.*
+                     , profunctors          == 5.*
+                     , QuickCheck           == 2.8.*
                      , testing-feat         == 0.4.*
                      , text                 == 1.*
                      , transformers         == 0.4.*
-                     , time                 == 1.4.*
+                     , time                 == 1.5.*
                      , unordered-containers == 0.2.*
                      , void                 == 0.7.*
   hs-source-dirs:      src
